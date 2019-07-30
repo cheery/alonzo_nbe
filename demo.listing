@@ -1,0 +1,10 @@
+# SKI combinator calculus
+i = x ↦ x
+k = x ↦ y ↦ x
+s = x ↦ y ↦ z ↦ x z(y z)
+
+# Some test reductions found from an exercise.
+test_1 = (x ↦ x y)(z ↦ z)
+test_2 = w ↦ (x ↦ (y ↦ x y) x) (z ↦ w)
+test_3 = (((f ↦ g ↦ (x ↦ (f x)(g x)))(m ↦ n ↦ n m))(n ↦ z)) p
+test_4 = k ↦ (f ↦ (g ↦ f f g) (h ↦ k h)) (x ↦ y ↦ y)
