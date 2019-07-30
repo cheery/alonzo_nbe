@@ -23,7 +23,7 @@ Obstacles:
 
  1. Insufficiently documented.
     1. References to papers and pages introducing algorithms
-       or techniques being used are completely missing.
+       or techniques being used are partially missing.
     2. The source code remains undocumented.
        Thinking of doing it with `Main.txt` you're supposed to scroll
        side-by-side with code, but would be readable individually as well.
@@ -37,3 +37,12 @@ Obstacles:
     No conclusion decided.
 
 `cabal install .` produces an executable named `lc-nbe`
+
+## References and papers
+
+This is a collected list of all the references in this project.
+The `[N]` marking used in this directory with some number `N` indexes this list.
+
+ 1. [Checking Dependent Types with Normalization by Evaluation: A Tutorial](http://www.davidchristiansen.dk/tutorials/nbe/)
+    [(Haskell Version)](http://davidchristiansen.dk/tutorials/implementing-types-hs.pdf) | David Thrane Christiansen
+ 2. [FUNCTIONAL PEARLS: Monadic Parsing in Haskell](http://www.cs.nott.ac.uk/~pszgmh/pearl.pdf) | Graham Hutton, Erik Meijer
