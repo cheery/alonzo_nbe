@@ -1,6 +1,7 @@
 module Main where
+
+import GHC.Base (Alternative, empty, (<|>))
 import Data.List (elemIndex, filter)
-import Control.Applicative ((<*>))
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import System.Environment (getArgs, getProgName)
@@ -60,14 +61,54 @@ parens_wrap rbp c s = if rbp <= c then s else "(" ++ s ++ ")"
 
 fresh_names :: (String -> Bool) -> [String]
 fresh_names occurs = filter (not.occurs) names where
-    names = concat (map n_names [1..])
-    n_names 1 = prefixes <*> [""]
-    n_names n = prefixes <*> (n_names (n-1))
-    prefixes = [(:)] <*> ['a'..'z']
+    names = [replicate k ['a'..'z'] | k <- [1..]] >>= sequence
 
 -- Parsing
-accept is_symbol (a:s) | is_symbol a = Right (a,s)
-accept _ s = Left s
+newtype Parser a = Parser ([Token] -> Either [Token] (a,[Token]))
+
+instance Functor Parser where
+    fmap f (Parser p) = Parser (\s -> do
+        (a, s) <- p s
+        Right (f a, s))
+
+instance Applicative Parser where
+    pure a = Parser (\s -> Right (a, s))
+    Parser f <*> Parser p = Parser (\s -> do
+        (f,s) <- f s
+        (a,s) <- p s
+        Right (f a, s))
+
+instance Monad Parser where
+    return a = Parser (\s -> Right (a,s))
+    Parser p >>= f  = Parser (\s -> do
+        (a,s) <- p s
+        let Parser p_next = f a
+        p_next s)
+
+instance Alternative Parser where
+    empty = Parser (\s -> Left s)
+    Parser p <|> Parser q = Parser (\s ->
+        case p s of
+            Right x -> Right x
+            Left _ -> q s)
+
+parse :: Parser a -> [Token] -> Either [Token] (a,[Token])
+parse (Parser f) = f
+
+accept :: (Token -> Bool) -> Parser Token
+accept is_symbol = Parser casing where
+    casing (a:s) | is_symbol a = Right (a,s)
+    casing s                   = Left s
+
+peek :: (Token -> Bool) -> Parser Token
+peek is_symbol = Parser casing where
+    casing (a:s) | is_symbol a = Right (a,a:s)
+    casing s                   = Left s
+
+at_eof :: Parser ()
+at_eof = Parser casing where
+    casing [] = Right ((), [])
+    casing s  = Left s
 
 data Structure = Declaration String
 
@@ -83,60 +124,58 @@ insert_declaration name term m = Module
     (Declaration name:get_structure m)
     (Map.insert name term (get_declarations m))
 
-parse_module :: [Token] -> Either [Token] Module
-parse_module [] = Right empty_module
-parse_module s  = do
-    (insert, s) <- parse_statement s
-    case s of
-      []        -> Right (insert empty_module)
-      Endline:s -> fmap insert (parse_module s)
-      s         -> Left s
+parse_module  = do
+    (at_eof >> return empty_module)
+    <|> do
+    insert <- parse_statement
+    do
+        (at_eof >> return (insert empty_module))
+        <|>
+        (accept (Endline==) >> fmap insert parse_module)
 
-parse_statement s = do
-    (i,s) <- accept is_identifier s
+parse_statement = do
+    i <- accept is_identifier
     let (Identifier name) = i
-    (_,s) <- accept (Equals==) s
-    (term,s) <- parse_term [] 0 s
-    return (insert_declaration name term, s)
+    accept (Equals==)
+    term <- parse_term [] 0
+    return (insert_declaration name term)
  
-parse_term ctx rbp s = do
-    case accept (LParen==) s of
-        Right (_,s) -> do
-            (term,s) <- parse_term ctx 0 s
-            (_,s) <- accept (RParen==) s
-            lbp_loop ctx rbp (term, s)
-        Left s -> do
-            (i,s) <- accept is_identifier s
-            let (Identifier name) = i
-            case lbp_check rbp s >>= accept (Maple==) of
-                Right (_,s) -> do
-                    (body, s) <- parse_term (name:ctx) 9 s
-                    lbp_loop ctx rbp (Abs body, s)
-                Left s -> lbp_loop ctx rbp (getvar ctx name, s)
+parse_term ctx rbp = do
+    accept (LParen==)
+    term <- parse_term ctx 0
+    accept (RParen==)
+    lbp_loop ctx rbp term
+    <|> do
+    i <- accept is_identifier
+    let (Identifier name) = i
+    do
+        lbp_check rbp >> accept (Maple==)
+        body <- parse_term (name:ctx) 9
+        lbp_loop ctx rbp (Abs body)
+        <|>
+        lbp_loop ctx rbp (getvar ctx name)
 
 getvar ctx name = case elemIndex name ctx of
     Just i -> Var i
     Nothing -> Name name
 
-lbp_loop ctx rbp (item, s) =
-    case lbp_check rbp s of
-        Right s -> do
-            left_denotation ctx (item, s) >>= lbp_loop ctx rbp
-        Left s -> do return (item, s)
+lbp_loop ctx rbp item = do
+    (lbp_check rbp >> left_denotation ctx item >>= lbp_loop ctx rbp)
+    <|>
+    return item
 
-lbp_check rbp (LParen:s)       | rbp < 20 = Right (LParen:s)
-lbp_check rbp (Identifier a:s) | rbp < 20 = Right (Identifier a:s)
-lbp_check rbp (Equals:s)       | rbp < 5  = Right (Equals:s)
-lbp_check rbp (Maple:s)        | rbp < 30 = Right (Maple:s)
-lbp_check rbp s                = Left s
+lbp_check rbp = peek check where
+    check (LParen)       | rbp < 20 = True
+    check (Identifier a) | rbp < 20 = True
+    check (Equals)       | rbp < 5  = True
+    check (Maple)        | rbp < 30 = True
+    check s              = False
 
-left_denotation ctx (fun, LParen:s) = do
-    (app,s) <- parse_term ctx 0 (LParen:s)
-    return (App fun app,s)
-left_denotation ctx (fun, Identifier n:s) = do
-    (app,s) <- parse_term ctx 20 (Identifier n:s)
-    return (App fun app,s)
-left_denotation ctx (_,s) = Left s
+left_denotation ctx fun = do
+    (peek (LParen==) <|> peek is_identifier)
+    fmap (App fun) (parse_term ctx 0)
+    <|> do
+    fmap (App fun) (parse_term ctx 20)
 
 -- Tokenization
 data Token =
@@ -223,8 +262,8 @@ main = do
 load_module path = do
     source <- readFile path
     let tokens = tokenize_all source
-    case parse_module tokens of
-        Right m ->
+    case parse parse_module tokens of
+        Right (m,[]) ->
             mapM_ (normalize_and_print m) (get_structure m)
         Left s -> do
             putStrLn ("parse error at token:"

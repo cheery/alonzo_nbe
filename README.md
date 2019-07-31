@@ -5,6 +5,11 @@ Named after Alonzo Church and the normalization strategy that is being used.
 Features:
 
  * Skeleton functionality.
+ * Avoids introduction of external dependencies,
+   therefore fairly easy to build.
+
+ * `Main.txt` documentation that you scroll side-by-side with source code.
+   You can use scrollbind in Vim to do this.
 
 Planned:
 
@@ -24,9 +29,7 @@ Obstacles:
  1. Insufficiently documented.
     1. References to papers and pages introducing algorithms
        or techniques being used are partially missing.
-    2. The source code remains undocumented.
-       Thinking of doing it with `Main.txt` you're supposed to scroll
-       side-by-side with code, but would be readable individually as well.
+    2. The source code remains very lightly documented.
  2. Stops on the first syntax error.
  3. No typechecking implemented.
  4. Pretty printing not present.
@@ -40,9 +43,9 @@ Obstacles:
 
 ## References and papers
 
-This is a collected list of all the references in this project.
+All the references in this project.
 The `[N]` marking used in this directory with some number `N` indexes this list.
 
- 1. [Checking Dependent Types with Normalization by Evaluation: A Tutorial](http://www.davidchristiansen.dk/tutorials/nbe/)
+ 1. [Checking Dependent Types with Normalization by Evaluation: A Tutorial](http://www.davidchristiansen.dk/tutorials/nbe/),
     [(Haskell Version)](http://davidchristiansen.dk/tutorials/implementing-types-hs.pdf) | David Thrane Christiansen
  2. [FUNCTIONAL PEARLS: Monadic Parsing in Haskell](http://www.cs.nott.ac.uk/~pszgmh/pearl.pdf) | Graham Hutton, Erik Meijer
