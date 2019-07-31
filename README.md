@@ -8,6 +8,7 @@ Features:
  * Avoids introduction of external dependencies,
    therefore fairly easy to build.
  * On an error, marks the failure point and resets parsing on the next blank line.
+ * Informs about missing declarations and judgements
 
  * `Main.txt` documentation that you scroll side-by-side with source code.
    You can use scrollbind in Vim to do this.
@@ -31,10 +32,8 @@ Obstacles:
     1. References to papers and pages introducing algorithms
        or techniques being used are partially missing.
     2. The source code remains very lightly documented.
- 2. Does not parse type declarations.
  3. No typechecking implemented.
  4. Pretty printing not present.
- 5. Does not inform about missing judgements or definitions.
  6. No inference functionality.
  7. Objectives are still open.
     Not entirely clear what is the extent of the exploration.

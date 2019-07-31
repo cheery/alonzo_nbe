@@ -10,6 +10,9 @@ import System.Exit (exitFailure)
 data Term = Var Int | App Term Term | Name String | Abs Term
             deriving (Show, Eq)
 
+data Type = Some String | Arrow Type Type
+            deriving (Show, Eq)
+
 data Value =
     Closure (String -> Maybe Term) [Value] Term
   | NVar Int
@@ -56,6 +59,13 @@ stringify_ rbp nn ctx (App a b) =
 stringify_ rbp (n:nn) ctx (Abs a) = 
     let (s, nnn) = stringify_ 0 nn (n:ctx) a in
         (parens_wrap rbp 0 (n ++ " " ++ lexeme Maple ++ " " ++ s), nnn)
+
+ty_stringify (Arrow (Arrow a b) c) =
+    "(" ++ ty_stringify (Arrow a b) ++ ") "
+    ++ lexeme ArrowSym ++ " " ++ ty_stringify c
+ty_stringify (Arrow (Some a) c) =
+    a ++ " " ++ lexeme ArrowSym ++ " " ++ ty_stringify c
+ty_stringify (Some a) = a
 
 parens_wrap rbp c s = if rbp <= c then s else "(" ++ s ++ ")"
 
@@ -112,19 +122,34 @@ at_eof = Parser casing where
 
 data Structure =
     Declaration String
+  | Judgement String
   | NoParse [Token]
 
 data Module = Module {
     get_structure :: [Structure],
-    get_declarations :: Map.Map String Term }
+    get_declarations :: Map.Map String Term,
+    get_judgements :: Map.Map String Type }
 
 empty_module :: Module
-empty_module = Module [] (Map.empty)
+empty_module = Module [] (Map.empty) (Map.empty)
 
 insert_declaration :: String -> Term -> Module -> Module
 insert_declaration name term m = Module
     (Declaration name:get_structure m)
     (Map.insert name term (get_declarations m))
+    (get_judgements m)
+
+insert_judgement :: String -> Type -> Module -> Module
+insert_judgement name ty m = Module
+    (Judgement name:get_structure m)
+    (get_declarations m)
+    (Map.insert name ty (get_judgements m))
+
+insert_noparse :: [Token] -> Module -> Module
+insert_noparse tokens m = Module
+    (NoParse tokens:get_structure m)
+    (get_declarations m)
+    (get_judgements m)
 
 parse_module  = do
     (at_eof >> return empty_module)
@@ -138,9 +163,14 @@ parse_module  = do
 parse_statement = do
     i <- accept is_identifier
     let (Identifier name) = i
-    accept (Equals==)
-    term <- parse_term [] 0
-    return (insert_declaration name term)
+    do
+        accept (Equals==)
+        term <- parse_term [] 0
+        return (insert_declaration name term)
+        <|> do
+        accept (Colon==)
+        ty <- parse_type
+        return (insert_judgement name ty)
 
 parse_noparse = do
     tokens <- rollto (Endline/=)
@@ -148,10 +178,24 @@ parse_noparse = do
     where
     rollto cond = Parser (\s ->
         Right (takeWhile cond s, dropWhile cond s))
-    insert_noparse tokens m = Module
-        (NoParse tokens:get_structure m)
-        (get_declarations m)
- 
+
+parse_type = do
+    t <- do
+        accept (LParen==)
+        ty <- parse_type
+        accept (RParen==)
+        return ty
+        <|> do
+        i <- accept is_identifier
+        let (Identifier name) = i
+        return (Some name)
+    do
+        accept (ArrowSym==)
+        fmap (Arrow t) parse_type
+        <|>
+        return t
+    
+
 parse_term ctx rbp = do
     accept (LParen==)
     term <- parse_term ctx 0
@@ -180,6 +224,7 @@ lbp_check rbp = peek check where
     check (LParen)       | rbp < 20 = True
     check (Identifier a) | rbp < 20 = True
     check (Equals)       | rbp < 5  = True
+    check (Colon)        | rbp < 5  = True
     check (Maple)        | rbp < 30 = True
     check s              = False
 
@@ -196,7 +241,8 @@ data Token =
     | Garbled String
     | Identifier String
     | Maple
-    | Arrow
+    | ArrowSym
+    | Colon
     | Equals
     | LParen
     | RParen
@@ -214,7 +260,8 @@ lexeme Whitespace = " "
 lexeme (Garbled s) = s
 lexeme (Identifier s) = s
 lexeme Maple = "↦"
-lexeme Arrow = "→"
+lexeme ArrowSym = "→"
+lexeme Colon = ":"
 lexeme Equals = "="
 lexeme LParen = "("
 lexeme RParen = ")"
@@ -243,7 +290,8 @@ tokenize (a:s) | is_symbol a = identifier (a:) s where
     identifier p (b:s) | is_num b    = identifier (p.(b:)) s
     identifier p s                   = (Identifier (p []), s)
 tokenize ('↦':s) = (Maple, s)
-tokenize ('→':s) = (Arrow, s)
+tokenize ('→':s) = (ArrowSym, s)
+tokenize (':':s) = (Colon, s)
 tokenize ('=':s) = (Equals, s)
 tokenize ('(':s) = (LParen, s)
 tokenize (')':s) = (RParen, s)
@@ -285,12 +333,30 @@ load_module path = do
 normalize_and_print :: Module -> Structure -> IO () 
 normalize_and_print m (Declaration name) =
     let decls = get_declarations m
+        judgs = get_judgements m
         (Just term) = Map.lookup name decls in do
         let nterm = readback 0 (eval (\x -> Map.lookup x decls) (opens 0) term)
         let ref = references nterm
         let occur name = Set.member name ref || Map.member name decls
+        mapM_ (report_missing_judgement judgs) ref 
         putStrLn (name ++ " = " ++ stringify 0 occur nterm)
+normalize_and_print m (Judgement name) = do
+    let judgs = get_judgements m
+    let decls = get_declarations m
+    let (Just ty) = Map.lookup name judgs
+    putStrLn (name ++ " : " ++ ty_stringify ty)
+    report_missing_declaration decls name
 normalize_and_print m (NoParse tokens) = do
     let text = intercalate " " (map lexeme tokens)
     putStrLn "# syntax error on the next line"
     putStrLn text
+
+report_missing_judgement judgs name =
+    if Map.member name judgs
+        then return ()
+        else putStrLn ("# " ++ name ++ " : ?")
+
+report_missing_declaration decls name =
+    if Map.member name decls
+        then return ()
+        else putStrLn ("# " ++ name ++ " = ?")
