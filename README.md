@@ -4,19 +4,18 @@ Named after Alonzo Church and the normalization strategy that is being used.
 
 Features:
 
- * Skeleton functionality.
+ * Normalization by evaluation
+ * Bidirectional typing
  * Avoids introduction of external dependencies,
    therefore fairly easy to build.
  * On an error, marks the failure point and resets parsing on the next blank line.
  * Informs about missing declarations and judgements
-
  * `Main.txt` documentation that you scroll side-by-side with source code.
    You can use scrollbind in Vim to do this.
 
 Planned:
 
  * Normalization by evaluation (needs typechecking to ensure results are valid)
- * Bidirectional typing
  * Amicable to user errors
 
 Objectives:
@@ -32,10 +31,8 @@ Obstacles:
     1. References to papers and pages introducing algorithms
        or techniques being used are partially missing.
     2. The source code remains very lightly documented.
- 3. No typechecking implemented.
- 4. Pretty printing not present.
- 6. No inference functionality.
- 7. Objectives are still open.
+ 3. Pretty printing not present.
+ 5. Objectives are still open.
     Not entirely clear what is the extent of the exploration.
     No conclusion decided.
 

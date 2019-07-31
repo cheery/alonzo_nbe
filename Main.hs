@@ -128,28 +128,28 @@ data Structure =
 data Module = Module {
     get_structure :: [Structure],
     get_declarations :: Map.Map String Term,
-    get_judgements :: Map.Map String Type }
+    get_judgements :: Map.Map String Type,
+    get_unchecked :: [String],
+    get_checked :: [String] }
 
 empty_module :: Module
-empty_module = Module [] (Map.empty) (Map.empty)
+empty_module = Module [] (Map.empty) (Map.empty) [] []
 
 insert_declaration :: String -> Term -> Module -> Module
-insert_declaration name term m = Module
-    (Declaration name:get_structure m)
-    (Map.insert name term (get_declarations m))
-    (get_judgements m)
+insert_declaration name term m = m {
+    get_structure = (Declaration name:get_structure m),
+    get_declarations = (Map.insert name term (get_declarations m)),
+    get_unchecked = (name:get_unchecked m) }
 
 insert_judgement :: String -> Type -> Module -> Module
-insert_judgement name ty m = Module
-    (Judgement name:get_structure m)
-    (get_declarations m)
-    (Map.insert name ty (get_judgements m))
+insert_judgement name ty m = m {
+    get_structure = (Judgement name:get_structure m),
+    get_judgements = (Map.insert name ty (get_judgements m)),
+    get_unchecked = (name:get_unchecked m) }
 
 insert_noparse :: [Token] -> Module -> Module
-insert_noparse tokens m = Module
-    (NoParse tokens:get_structure m)
-    (get_declarations m)
-    (get_judgements m)
+insert_noparse tokens m = m {
+    get_structure = (NoParse tokens:get_structure m) }
 
 parse_module  = do
     (at_eof >> return empty_module)
@@ -229,10 +229,7 @@ lbp_check rbp = peek check where
     check s              = False
 
 left_denotation ctx fun = do
-    (peek (LParen==) <|> peek is_identifier)
-    fmap (App fun) (parse_term ctx 0)
-    <|> do
-    fmap (App fun) (parse_term ctx 20)
+    fmap (App fun) (parse_term ctx 21)
 
 -- Tokenization
 data Token =
@@ -330,16 +327,76 @@ load_module path = do
                 ++ (show (head s)))
             exitFailure
 
+data Fail =
+    Untyped String
+  | Undeclared String
+  | NotEqual Type Type
+  | NotArrow Term Type
+  | ShouldBeAnnotated Term
+    deriving (Show)
+
+verify_all :: (Module, [Fail]) -> [String] -> (Module, [Fail])
+verify_all (m,es) (name:names) = case verify name m of
+    Right m2 -> verify_all (m2, es) names
+    Left e   -> verify_all (m,e:es) names
+verify_all (m,es) [] = (m,es)
+
+verify :: String -> Module -> Either Fail Module
+verify name m | elem name (get_checked m) = Right m
+verify name m | elem name (get_unchecked m) = do
+    let m2 = m { get_unchecked = filter (/=name) (get_unchecked m) }
+    let decls = get_declarations m2
+    let judgs = get_judgements m2
+    case (Map.lookup name decls, Map.lookup name judgs) of
+        (Just term, Nothing) -> Left (Untyped name)
+        (Nothing,   Just ty) -> Right ()
+        (Just term, Just ty) -> check m2 [] term ty
+    Right $ m2 { get_checked = name : get_checked m2 }
+verify name m = Left (Undeclared name)
+
+infer :: Module -> [Type] -> Term -> Either Fail Type
+infer m ctx (Var x) = Right (ctx !! x)
+infer m ctx (Name name) = do
+    let judgs = get_judgements m
+    case Map.lookup name judgs of
+        Just ty -> Right ty
+        Nothing -> Left (Untyped name)
+infer m ctx (App f x) = do
+    (a, b) <- infer m ctx f >>= check_arrow f
+    check m ctx x a
+    return b
+infer m ctx oth = do
+    Left (ShouldBeAnnotated oth)
+
+check :: Module -> [Type] -> Term -> Type -> Either Fail ()
+check m ctx (Abs body) ty = do
+    (a,b) <- check_arrow (Abs body) ty
+    check m (a:ctx) body b
+check m ctx neu        ty = do
+    t <- infer m ctx neu
+    if ty == t then Right () else Left (NotEqual t ty)
+    
+check_arrow t (Arrow a b) = Right (a,b)
+check_arrow t a = Left (NotArrow t a)
+
 normalize_and_print :: Module -> Structure -> IO () 
-normalize_and_print m (Declaration name) =
+normalize_and_print m (Declaration name) = do
     let decls = get_declarations m
-        judgs = get_judgements m
-        (Just term) = Map.lookup name decls in do
-        let nterm = readback 0 (eval (\x -> Map.lookup x decls) (opens 0) term)
-        let ref = references nterm
+    let judgs = get_judgements m
+    let (Just term) = Map.lookup name decls
+    let ref = references term
+    mapM_ (report_missing_judgement judgs) ref 
+    let (m2,errors) = verify_all (m,[]) (name:Set.elems ref)
+    let lookup_fn x = if elem x (get_checked m2)
+        then Map.lookup x decls else Nothing
+    mapM_ report_error errors
+    if elem name (get_checked m2) then do
+        let nterm = readback 0 (eval lookup_fn  (opens 0) term)
         let occur name = Set.member name ref || Map.member name decls
-        mapM_ (report_missing_judgement judgs) ref 
         putStrLn (name ++ " = " ++ stringify 0 occur nterm)
+    else do
+        let occur name = Set.member name ref || Map.member name decls
+        putStrLn (name ++ " = " ++ stringify 0 occur term)
 normalize_and_print m (Judgement name) = do
     let judgs = get_judgements m
     let decls = get_declarations m
@@ -350,6 +407,8 @@ normalize_and_print m (NoParse tokens) = do
     let text = intercalate " " (map lexeme tokens)
     putStrLn "# syntax error on the next line"
     putStrLn text
+
+report_error fail = putStrLn $ "# " ++ show fail
 
 report_missing_judgement judgs name =
     if Map.member name judgs

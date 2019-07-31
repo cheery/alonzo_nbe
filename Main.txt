@@ -43,12 +43,22 @@ Interfacing happens through console.
 
 
 
+
+
+
 We could use a supply monad
 to get rid of the tricky 'nn' variable here.
 But there is much more going on.
 
 We would like the output to be pretty printing
 for the reason that it's possibly read by the user.
+
+
+
+
+
+
+
 
 
 
@@ -111,6 +121,21 @@ few other useful connectives while we're at it.
 
 
 Finally we're ready to define the actual parser.
+
+
+
+
+
+
+
+
+The type checked/unchecked separation helps at detecting and
+discarding recursive definitions.
+
+
+
+
+
 
 
 
@@ -264,6 +289,29 @@ term: identifier '↦' term
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 The main question I'm exploring with this project.
 How to create a good user interface
 for a proof assistant?
@@ -274,7 +322,9 @@ as the user is spending much more time with
 examining the program output rather than the
 output of the programs that both may produce.
 
-
+To explore this, we read out the file
+and print out an equivalent for it
+with terms normalized and checked.
 
 
 
