@@ -1,7 +1,7 @@
 module Main where
 
 import GHC.Base (Alternative, empty, (<|>))
-import Data.List (elemIndex, filter)
+import Data.List (elemIndex, filter, intercalate)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import System.Environment (getArgs, getProgName)
@@ -110,7 +110,9 @@ at_eof = Parser casing where
     casing [] = Right ((), [])
     casing s  = Left s
 
-data Structure = Declaration String
+data Structure =
+    Declaration String
+  | NoParse [Token]
 
 data Module = Module {
     get_structure :: [Structure],
@@ -127,7 +129,7 @@ insert_declaration name term m = Module
 parse_module  = do
     (at_eof >> return empty_module)
     <|> do
-    insert <- parse_statement
+    insert <- (parse_statement <|> parse_noparse)
     do
         (at_eof >> return (insert empty_module))
         <|>
@@ -139,6 +141,16 @@ parse_statement = do
     accept (Equals==)
     term <- parse_term [] 0
     return (insert_declaration name term)
+
+parse_noparse = do
+    tokens <- rollto (Endline/=)
+    return (insert_noparse tokens)
+    where
+    rollto cond = Parser (\s ->
+        Right (takeWhile cond s, dropWhile cond s))
+    insert_noparse tokens m = Module
+        (NoParse tokens:get_structure m)
+        (get_declarations m)
  
 parse_term ctx rbp = do
     accept (LParen==)
@@ -278,3 +290,7 @@ normalize_and_print m (Declaration name) =
         let ref = references nterm
         let occur name = Set.member name ref || Map.member name decls
         putStrLn (name ++ " = " ++ stringify 0 occur nterm)
+normalize_and_print m (NoParse tokens) = do
+    let text = intercalate " " (map lexeme tokens)
+    putStrLn "# syntax error on the next line"
+    putStrLn text

@@ -1,7 +1,14 @@
 # SKI combinator calculus
+i : a → a
+k : a → a → a
+s : (a → a → a) → (a → a) → a → a
+
 i = x ↦ x
 k = x ↦ y ↦ x
 s = x ↦ y ↦ z ↦ x z(y z)
+
+Malformed and garbled input during parsing
+  shouldn't cease the program.
 
 # Some test reductions found from an exercise.
 test_1 = (x ↦ x y)(z ↦ z)

@@ -65,8 +65,9 @@ for the reason that it's possibly read by the user.
 
 
 Without monadic parsing, the parser would be a mess.
-I first did it without and you can compare:
-[git: 3ae3f22bf1edf0c31c798decacd123736c70ba89]
+First I did it without and you can compare:
+before [git: 3ae3f22bf1edf0c31c798decacd123736c70ba89]
+after  [git: cb693c7f929d9d5b964e185161ffbafa97bf6a8e]
 
 I started with the thing described in [2]
 and adjusted it for my usecase a bit.
@@ -78,7 +79,6 @@ Fortunately it's easy
 to define monadic parsers using monads.
 Even if Haskell requires that we also define
 few other useful connectives while we're at it.
-
 
 
 
@@ -124,11 +124,13 @@ Finally we're ready to define the actual parser.
 
 
 
+
+
 The parsing module needs a mechanism to
 have some relisiency toward parsing errors.
 It's available thanks to some layout sensitivity.
-
-
+We can read tokens until the point where we know
+layout would end the expression anyway.
 
 
 
@@ -252,6 +254,16 @@ term: identifier '↦' term
 
 
 
+
+
+
+
+
+
+
+
+
+
 The main question I'm exploring with this project.
 How to create a good user interface
 for a proof assistant?
@@ -261,6 +273,11 @@ by the need to communicate with the user
 as the user is spending much more time with
 examining the program output rather than the
 output of the programs that both may produce.
+
+
+
+
+
 
 
 
