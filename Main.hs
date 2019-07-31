@@ -194,7 +194,6 @@ parse_type = do
         fmap (Arrow t) parse_type
         <|>
         return t
-    
 
 parse_term ctx rbp = do
     accept (LParen==)
@@ -329,8 +328,8 @@ load_module path = do
 
 data Fail =
     Untyped String
-  | Undeclared String
-  | NotEqual Type Type
+  | Undeclared
+  | NotEqual Term Type Type
   | NotArrow Term Type
   | ShouldBeAnnotated Term
     deriving (Show)
@@ -338,6 +337,7 @@ data Fail =
 verify_all :: (Module, [Fail]) -> [String] -> (Module, [Fail])
 verify_all (m,es) (name:names) = case verify name m of
     Right m2 -> verify_all (m2, es) names
+    Left Undeclared -> verify_all (m,es) names
     Left e   -> verify_all (m,e:es) names
 verify_all (m,es) [] = (m,es)
 
@@ -352,7 +352,7 @@ verify name m | elem name (get_unchecked m) = do
         (Nothing,   Just ty) -> Right ()
         (Just term, Just ty) -> check m2 [] term ty
     Right $ m2 { get_checked = name : get_checked m2 }
-verify name m = Left (Undeclared name)
+verify name m = Left Undeclared
 
 infer :: Module -> [Type] -> Term -> Either Fail Type
 infer m ctx (Var x) = Right (ctx !! x)
@@ -374,7 +374,7 @@ check m ctx (Abs body) ty = do
     check m (a:ctx) body b
 check m ctx neu        ty = do
     t <- infer m ctx neu
-    if ty == t then Right () else Left (NotEqual t ty)
+    if ty == t then Right () else Left (NotEqual neu t ty)
     
 check_arrow t (Arrow a b) = Right (a,b)
 check_arrow t a = Left (NotArrow t a)
@@ -389,13 +389,12 @@ normalize_and_print m (Declaration name) = do
     let (m2,errors) = verify_all (m,[]) (name:Set.elems ref)
     let lookup_fn x = if elem x (get_checked m2)
         then Map.lookup x decls else Nothing
-    mapM_ report_error errors
+    let occur name = Set.member name ref || Map.member name decls
+    mapM_ (putStrLn.("# "++).error_report occur) errors
     if elem name (get_checked m2) then do
         let nterm = readback 0 (eval lookup_fn  (opens 0) term)
-        let occur name = Set.member name ref || Map.member name decls
         putStrLn (name ++ " = " ++ stringify 0 occur nterm)
     else do
-        let occur name = Set.member name ref || Map.member name decls
         putStrLn (name ++ " = " ++ stringify 0 occur term)
 normalize_and_print m (Judgement name) = do
     let judgs = get_judgements m
@@ -408,7 +407,9 @@ normalize_and_print m (NoParse tokens) = do
     putStrLn "# syntax error on the next line"
     putStrLn text
 
-report_error fail = putStrLn $ "# " ++ show fail
+error_report occur (Untyped name) = name ++ " : ?"
+error_report occur (ShouldBeAnnotated term) = stringify 0 occur term ++ " : ?"
+error_report occur fail = show fail
 
 report_missing_judgement judgs name =
     if Map.member name judgs

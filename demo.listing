@@ -11,6 +11,8 @@ Malformed and garbled input during parsing
   shouldn't cease the program.
 
 # Some test reductions found from an exercise.
+y : some_y
+test_1 : some_y
 test_1 = (x ↦ x y)(z ↦ z)
 test_2 = w ↦ (x ↦ (y ↦ x y) x) (z ↦ w)
 test_3 = (((f ↦ g ↦ (x ↦ (f x)(g x)))(m ↦ n ↦ n m))(n ↦ z)) p

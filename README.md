@@ -15,7 +15,6 @@ Features:
 
 Planned:
 
- * Normalization by evaluation (needs typechecking to ensure results are valid)
  * Amicable to user errors
 
 Objectives:
@@ -31,8 +30,9 @@ Obstacles:
     1. References to papers and pages introducing algorithms
        or techniques being used are partially missing.
     2. The source code remains very lightly documented.
+ 2. It'd be nice to inline annotate structures.
  3. Pretty printing not present.
- 5. Objectives are still open.
+ 4. Objectives are still open.
     Not entirely clear what is the extent of the exploration.
     No conclusion decided.
 

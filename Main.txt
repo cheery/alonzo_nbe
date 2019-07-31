@@ -311,7 +311,6 @@ term: identifier '↦' term
 
 
 
-
 The main question I'm exploring with this project.
 How to create a good user interface
 for a proof assistant?
