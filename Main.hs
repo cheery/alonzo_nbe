@@ -7,8 +7,13 @@ import qualified Data.Set as Set
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 
-data Term = Var Int | App Term Term | Name String | Abs Term
-            deriving (Show, Eq)
+data Term =
+    Var Int
+  | App Term Term
+  | Abs Term
+  | Name String
+  | Ann Term Type
+    deriving (Show, Eq)
 
 data Type = Some String | Arrow Type Type
             deriving (Show, Eq)
@@ -26,6 +31,7 @@ eval f p (Name n) = case f n of
     Nothing -> NName n
 eval f p (App rat ran) = apply (eval f p rat) (eval f p ran)
 eval f p (Abs body) = (Closure f p body)
+eval f p (Ann body ty) = eval f p body
 
 apply :: Value -> Value -> Value
 apply (Closure f env term) arg = eval f (arg:env) term
@@ -42,6 +48,7 @@ references (Var i)  = Set.empty
 references (App a b) = Set.union (references a) (references b)
 references (Abs a)   = references a
 references (Name n)  = Set.singleton n
+references (Ann t ty) = references t
 
 opens n = map (NVar . (n-)) [0..n-1]
 
@@ -59,6 +66,9 @@ stringify_ rbp nn ctx (App a b) =
 stringify_ rbp (n:nn) ctx (Abs a) = 
     let (s, nnn) = stringify_ 0 nn (n:ctx) a in
         (parens_wrap rbp 0 (n ++ " " ++ lexeme Maple ++ " " ++ s), nnn)
+stringify_ rbp (n:nn) ctx (Ann a ty) = 
+    let (s1, nnn) = stringify_ 10 nn ctx a in
+    (s1 ++ " : " ++ parens_wrap rbp 5 (ty_stringify ty), nnn)
 
 ty_stringify (Arrow (Arrow a b) c) =
     "(" ++ ty_stringify (Arrow a b) ++ ") "
@@ -227,8 +237,11 @@ lbp_check rbp = peek check where
     check (Maple)        | rbp < 30 = True
     check s              = False
 
-left_denotation ctx fun = do
-    fmap (App fun) (parse_term ctx 21)
+left_denotation ctx val = do
+    accept (Colon==)
+    fmap (Ann val) parse_type
+    <|> do
+    fmap (App val) (parse_term ctx 21)
 
 -- Tokenization
 data Token =
@@ -365,6 +378,9 @@ infer m ctx (App f x) = do
     (a, b) <- infer m ctx f >>= check_arrow f
     check m ctx x a
     return b
+infer m ctx (Ann t ty) = do
+    check m ctx t ty
+    return ty
 infer m ctx oth = do
     Left (ShouldBeAnnotated oth)
 
