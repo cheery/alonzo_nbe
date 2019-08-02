@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Monad.State.Lazy (State, runState, evalState, get, put)
 import GHC.Base (Alternative, empty, (<|>))
 import Data.List (elemIndex, filter, intercalate)
 import qualified Data.Map as Map
@@ -52,36 +53,144 @@ references (Ann t ty) = references t
 
 opens n = map (NVar . (n-)) [0..n-1]
 
--- Printing (not pretty for now)
-stringify count occur e = fst (stringify_ 0 (drop count nn) (reverse $ take count nn) e) where
-    nn = (fresh_names occur)
+-- Printing
+type PrettyState a = State (Int, [String], ([Block] -> [Block])) a
 
-stringify_ :: Int -> [String] -> [String] -> Term -> (String, [String])
-stringify_ rbp nn ctx (Var i) = (ctx!!i, nn)
-stringify_ rbp nn ctx (Name n) = (lexeme (Identifier n), nn)
-stringify_ rbp nn ctx (App a b) = 
-    let (s1, nnn) = stringify_ 10 nn ctx a in
-    let (s2, nnnn) = stringify_ 11 nnn ctx b in
-        (parens_wrap rbp 10 (s1 ++ " " ++ s2), nnnn)
-stringify_ rbp (n:nn) ctx (Abs a) = 
-    let (s, nnn) = stringify_ 0 nn (n:ctx) a in
-        (parens_wrap rbp 0 (n ++ " " ++ lexeme Maple ++ " " ++ s), nnn)
-stringify_ rbp (n:nn) ctx (Ann a ty) = 
-    let (s1, nnn) = stringify_ 10 nn ctx a in
-    (s1 ++ " : " ++ parens_wrap rbp 5 (ty_stringify ty), nnn)
+page_width = 80
 
-ty_stringify (Arrow (Arrow a b) c) =
-    "(" ++ ty_stringify (Arrow a b) ++ ") "
-    ++ lexeme ArrowSym ++ " " ++ ty_stringify c
-ty_stringify (Arrow (Some a) c) =
-    a ++ " " ++ lexeme ArrowSym ++ " " ++ ty_stringify c
-ty_stringify (Some a) = a
+stringify :: Int -> (String -> Bool) -> Term -> String
+stringify count occur e = pretty_init_layout margin (ss []) where
+    ((), (margin, _, ss)) = runState (stringify_ 0 ctx e) (page_width, mm, id)
+    ctx = reverse $ take count nn
+    mm = drop count nn
+    nn = fresh_names occur
 
-parens_wrap rbp c s = if rbp <= c then s else "(" ++ s ++ ")"
+stringify_ :: Int -> [String] -> Term -> PrettyState ()
+stringify_ rbp ctx (Var i) = textb (ctx!!i)
+stringify_ rbp ctx (Name n) = textb (lexeme (Identifier n))
+stringify_ rbp ctx (App a b) = do
+    leftb
+    (parens_wrap rbp 10 $ do
+        stringify_ 10 ctx a >> blankb " " 2 >> stringify_ 11 ctx b)
+    rightb
+stringify_ rbp ctx (Abs a) = do
+    leftb
+    (parens_wrap rbp 0 $ do
+        n <- fresh_name
+        textb n >> textb " " >> textb (lexeme Maple) >> blankb " " 2
+        stringify_ 0 (n:ctx) a)
+    rightb
+stringify_ rbp ctx (Ann a ty) = do
+    leftb
+    stringify_ 10 ctx a
+    textb " : "
+    parens_wrap rbp 5 (ty_stringify_ ty)
+    rightb
+
+ty_stringify :: Type -> String
+ty_stringify ty = pretty_init_layout margin (ss []) where
+    ((), (margin, nn, ss)) = runState (ty_stringify_ ty) (page_width, [], id)
+
+ty_stringify_ :: Type -> PrettyState ()
+ty_stringify_ (Arrow (Arrow a b) c) = do
+    leftb >> textb "(" >> ty_stringify_ (Arrow a b) >> textb ")"
+    blankb " " 2 >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify_ c
+ty_stringify_ (Arrow (Some a) c) = do
+    textb a >> textb " " >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify_ c
+ty_stringify_ (Some a) = textb a
+
+parens_wrap rbp c s = if rbp <= c then s else 
+    leftb >> textb "(" >> s >> textb ")" >> rightb
 
 fresh_names :: (String -> Bool) -> [String]
 fresh_names occurs = filter (not.occurs) names where
     names = [replicate k ['a'..'z'] | k <- [1..]] >>= sequence
+
+fresh_name :: PrettyState String
+fresh_name = do
+    (margin, nn, s) <- get
+    put (margin, tail nn, s)
+    return (head nn)
+
+insb :: (Int -> [Block] -> [Block]) -> PrettyState ()
+insb node = do
+    (margin, nn, s) <- get
+    put (margin, nn, s.(node margin))
+
+leftb = insb scan_left
+rightb = insb scan_right
+blankb text indent = insb (scan_blank text indent)
+textb text = insb (scan_text text)
+
+-- Scanner and printer internals
+--
+-- The scanner runs three line widths before the printer and checks how many
+-- spaces the blanks and groups take. This allows the printer determine
+-- whether the line or grouping should be broken into multiple lines.
+scan_left margin rest = LeftB (scan_to_right 0 0 margin rest) : rest
+scan_right margin rest = RightB : rest
+scan_blank text indent margin rest =
+    BlankB text (length text) indent (scan_to_blank 0 margin rest) : rest
+
+scan_text :: String -> Int -> [Block] -> [Block]
+scan_text text margin rest = TextB text (length text) : rest
+
+scan_to_blank :: Int -> Int -> [Block] -> Int
+scan_to_blank total margin _ | margin < total    = total
+scan_to_blank total margin (BlankB _ _ _ _:rest) = total
+scan_to_blank total margin (a:rest) =
+    scan_to_blank (total + block_len a) margin rest
+scan_to_blank total margin [] = total
+
+scan_to_right :: Int -> Int -> Int -> [Block] -> Int
+scan_to_right 0 total margin _ | margin < total = total
+scan_to_right 0 total margin (RightB:rest) = total
+scan_to_right n total margin (LeftB _:rest) =
+    scan_to_right (n+1) total margin rest
+scan_to_right n total margin (RightB:rest) =
+    scan_to_right (n-1) total margin rest
+scan_to_right n total margin (BlankB _ len _ _:rest) =
+    scan_to_right n (total+len) margin rest
+scan_to_right n total margin (TextB _ len:rest) =
+    scan_to_right n (total+len) margin rest
+scan_to_right n total margin [] = total
+
+-- Layout: spaces, spaces, force_break
+-- Left size, Right, Blank text len indent size, Context text len
+data Block = LeftB Int | RightB | BlankB String Int Int Int | TextB String Int
+block_len (LeftB _)          = 0
+block_len (RightB)           = 0
+block_len (BlankB _ len _ _) = len
+block_len (TextB  _ len)     = len
+
+-- Printer keeps the track of layout during printing.
+data Layout = Layout Layout Int Bool
+
+pretty_init_layout width =
+    pretty_layout width width width (Layout undefined width False)
+
+pretty_layout :: Int -> Int -> Int -> Layout -> [Block] -> String
+pretty_layout margin spaceleft spaces layout (cell:cells) = case cell of
+    LeftB size ->
+        let layout' = Layout layout spaces (size < 0 || spaceleft < size) in
+        pretty_layout margin spaceleft spaces layout' cells
+    RightB ->
+        let Layout layout' _ _ = layout in
+        pretty_layout margin spaceleft spaces layout' cells
+    BlankB text len indent size ->
+        let Layout parent layout_spaces force_break = layout in
+        if size < 0 || spaceleft < size || force_break
+        then
+            let spaces' = layout_spaces - indent
+                spaceleft' = spaces' in
+            ('\n' : [' ' | _ <- [spaces'..margin-1]])
+            ++ pretty_layout margin spaceleft' spaces' layout cells
+        else
+            let len = length text in
+            text ++ pretty_layout margin (spaceleft - len) spaces layout cells
+    TextB text len ->
+        text ++ pretty_layout margin (spaceleft - len) spaces layout cells
+pretty_layout margin spaceleft spaces layout [] = []
 
 -- Parsing
 newtype Parser a = Parser ([Token] -> Either [Token] (a,[Token]))

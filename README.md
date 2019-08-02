@@ -12,6 +12,8 @@ Features:
  * Informs about missing declarations and judgements
  * `Main.txt` documentation that you scroll side-by-side with source code.
    You can use scrollbind in Vim to do this.
+ * A bit silly pretty printing routine
+   that was translated from procedural code.
 
 Planned:
 
@@ -30,8 +32,7 @@ Obstacles:
     1. References to papers and pages introducing algorithms
        or techniques being used are partially missing.
     2. The source code remains very lightly documented.
- 3. Pretty printing not present.
- 4. Objectives are still open.
+ 2. Objectives are still open.
     Not entirely clear what is the extent of the exploration.
     No conclusion decided.
 
@@ -45,3 +46,4 @@ The `[N]` marking used in this directory with some number `N` indexes this list.
  1. [Checking Dependent Types with Normalization by Evaluation: A Tutorial](http://www.davidchristiansen.dk/tutorials/nbe/),
     [(Haskell Version)](http://davidchristiansen.dk/tutorials/implementing-types-hs.pdf) | David Thrane Christiansen
  2. [FUNCTIONAL PEARLS: Monadic Parsing in Haskell](http://www.cs.nott.ac.uk/~pszgmh/pearl.pdf) | Graham Hutton, Erik Meijer
+ 3. [CS-TR-79-770](http://i.stanford.edu/TR/CS-TR-79-770.html) Pretty Printing | Oppen, Derek C.
