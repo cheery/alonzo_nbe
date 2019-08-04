@@ -56,48 +56,43 @@ opens n = map (NVar . (n-)) [0..n-1]
 -- Printing
 type PrettyState a = State (Int, [String], ([Block] -> [Block])) a
 
-page_width = 80
+pretty_run :: Int -> [String] -> PrettyState () -> String
+pretty_run page_width nn state = pretty_init_layout margin (ss []) where
+    ((), (margin, _, ss)) = runState state (page_width, nn, id)
 
-stringify :: Int -> (String -> Bool) -> Term -> String
-stringify count occur e = pretty_init_layout margin (ss []) where
-    ((), (margin, _, ss)) = runState (stringify_ 0 ctx e) (page_width, mm, id)
-    ctx = reverse $ take count nn
-    mm = drop count nn
-    nn = fresh_names occur
-
-stringify_ :: Int -> [String] -> Term -> PrettyState ()
-stringify_ rbp ctx (Var i) = textb (ctx!!i)
-stringify_ rbp ctx (Name n) = textb (lexeme (Identifier n))
-stringify_ rbp ctx (App a b) = do
+stringify :: Int -> [String] -> Term -> PrettyState ()
+stringify rbp ctx (Var i) = textb (ctx!!i)
+stringify rbp ctx (Name n) = textb (lexeme (Identifier n))
+stringify rbp ctx (App a b) = do
     leftb
     (parens_wrap rbp 10 $ do
-        stringify_ 10 ctx a >> blankb " " 2 >> stringify_ 11 ctx b)
+        stringify 10 ctx a >> blankb " " 2 >> stringify 11 ctx b)
     rightb
-stringify_ rbp ctx (Abs a) = do
+stringify rbp ctx (Abs a) = do
     leftb
     (parens_wrap rbp 0 $ do
         n <- fresh_name
         textb n >> textb " " >> textb (lexeme Maple) >> blankb " " 2
-        stringify_ 0 (n:ctx) a)
+        stringify 0 (n:ctx) a)
     rightb
-stringify_ rbp ctx (Ann a ty) = do
+stringify rbp ctx (Ann a ty) = do
     leftb
-    stringify_ 10 ctx a
+    stringify 10 ctx a
     textb " : "
-    parens_wrap rbp 5 (ty_stringify_ ty)
+    parens_wrap rbp 5 (ty_stringify ty)
     rightb
 
-ty_stringify :: Type -> String
-ty_stringify ty = pretty_init_layout margin (ss []) where
-    ((), (margin, nn, ss)) = runState (ty_stringify_ ty) (page_width, [], id)
+-- ty_stringify :: Int -> Type -> String
+-- ty_stringify page_width ty = pretty_init_layout margin (ss []) where
+--     ((), (margin, nn, ss)) = runState (ty_stringify ty) (page_width, [], id)
 
-ty_stringify_ :: Type -> PrettyState ()
-ty_stringify_ (Arrow (Arrow a b) c) = do
-    leftb >> textb "(" >> ty_stringify_ (Arrow a b) >> textb ")"
-    blankb " " 2 >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify_ c
-ty_stringify_ (Arrow (Some a) c) = do
-    textb a >> textb " " >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify_ c
-ty_stringify_ (Some a) = textb a
+ty_stringify :: Type -> PrettyState ()
+ty_stringify (Arrow (Arrow a b) c) = do
+    leftb >> textb "(" >> ty_stringify (Arrow a b) >> textb ")"
+    blankb " " 2 >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify c
+ty_stringify (Arrow (Some a) c) = do
+    textb a >> textb " " >> textb (lexeme ArrowSym) >> textb " " >> ty_stringify c
+ty_stringify (Some a) = textb a
 
 parens_wrap rbp c s = if rbp <= c then s else 
     leftb >> textb "(" >> s >> textb ")" >> rightb
@@ -136,14 +131,14 @@ scan_text :: String -> Int -> [Block] -> [Block]
 scan_text text margin rest = TextB text (length text) : rest
 
 scan_to_blank :: Int -> Int -> [Block] -> Int
-scan_to_blank total margin _ | margin < total    = total
+scan_to_blank total margin _ | margin*3 < total    = total
 scan_to_blank total margin (BlankB _ _ _ _:rest) = total
 scan_to_blank total margin (a:rest) =
     scan_to_blank (total + block_len a) margin rest
 scan_to_blank total margin [] = total
 
 scan_to_right :: Int -> Int -> Int -> [Block] -> Int
-scan_to_right 0 total margin _ | margin < total = total
+scan_to_right 0 total margin _ | margin*3 < total = total
 scan_to_right 0 total margin (RightB:rest) = total
 scan_to_right n total margin (LeftB _:rest) =
     scan_to_right (n+1) total margin rest
@@ -243,6 +238,8 @@ data Structure =
     Declaration String
   | Judgement String
   | NoParse [Token]
+  | Problems String
+  | Errors String [Fail]
 
 data Module = Module {
     get_structure :: [Structure],
@@ -433,21 +430,27 @@ is_num _ = False
 main = do 
     args <- getArgs
     prg <- getProgName
+    let margin = 80
     case args of
-        [a] -> load_module a
+        [a] -> do
+            m <- load_module a
+            let sr = normalize_all m (get_structure m)
+            mapM_ (print_module_entry margin) sr
         _ -> putStrLn $ "usage: "++prg++" module_path"
 
+load_module :: String -> IO Module
 load_module path = do
     source <- readFile path
     let tokens = tokenize_all source
     case parse parse_module tokens of
-        Right (m,[]) ->
-            mapM_ (normalize_and_print m) (get_structure m)
+        Right (m,[]) -> return m
         Left s -> do
             putStrLn ("parse error at token:"
                 ++ (show (head s)))
             exitFailure
+            return undefined
 
+-- Typechecking
 data Fail =
     Untyped String
   | Undeclared
@@ -504,44 +507,83 @@ check m ctx neu        ty = do
 check_arrow t (Arrow a b) = Right (a,b)
 check_arrow t a = Left (NotArrow t a)
 
-normalize_and_print :: Module -> Structure -> IO () 
-normalize_and_print m (Declaration name) = do
+-- Normalization within a module
+normalize_all :: Module -> [Structure] -> [(Module, Structure)]
+normalize_all m (Declaration name:rest) =
+    let (m2, sr) = normalize_decl m name in 
+        sr ++ normalize_all m2 rest
+normalize_all m (a:rest) =
+    (m,a):normalize_all m rest
+normalize_all m [] = []
+
+normalize_decl m name = 
+    let decls = get_declarations m
+        (Just term) = Map.lookup name decls
+        judgs = get_judgements m
+        ref = references term
+        (m2,errors) = verify_all (m,[]) (name:Set.elems ref)
+        lookup_fn x = if elem x (get_checked m2)
+            then Map.lookup x decls else Nothing
+        nterm = readback 0 (eval lookup_fn (opens 0) term)
+        m3 = m {get_declarations = Map.insert name nterm (get_declarations m2)} in
+    if null errors then
+        (m3, [(m3, Declaration name)])
+    else
+        (m3, [(m3, Errors name errors), (m3, Declaration name)])
+
+-- Printouts
+print_module_entry :: Int -> (Module, Structure) -> IO ()
+print_module_entry page_width (m, Declaration name) = do
     let decls = get_declarations m
     let judgs = get_judgements m
     let (Just term) = Map.lookup name decls
     let ref = references term
+    let occur name = (Set.member name ref || Map.member name decls)
     mapM_ (report_missing_judgement judgs) ref 
-    let (m2,errors) = verify_all (m,[]) (name:Set.elems ref)
-    let lookup_fn x = if elem x (get_checked m2)
-        then Map.lookup x decls else Nothing
-    let occur name = Set.member name ref || Map.member name decls
-    mapM_ (putStrLn.("# "++).error_report occur) errors
-    if elem name (get_checked m2) then do
-        let nterm = readback 0 (eval lookup_fn  (opens 0) term)
-        putStrLn (name ++ " = " ++ stringify 0 occur nterm)
-    else do
-        putStrLn (name ++ " = " ++ stringify 0 occur term)
-normalize_and_print m (Judgement name) = do
+    putStrLn (pretty_run page_width (fresh_names occur)
+        (textb name >> textb " = " >> stringify 0 [] term))
+
+print_module_entry page_width (m, Judgement name) = do
     let judgs = get_judgements m
     let decls = get_declarations m
     let (Just ty) = Map.lookup name judgs
-    putStrLn (name ++ " : " ++ ty_stringify ty)
+    putStrLn (pretty_run page_width []
+        (textb name >> textb " : " >> ty_stringify ty))
     report_missing_declaration decls name
-normalize_and_print m (NoParse tokens) = do
-    let text = intercalate " " (map lexeme tokens)
+
+print_module_entry page_width (m, NoParse tokens) = do
+    let text = spaces_apart (map (textb.lexeme) tokens)
     putStrLn "# syntax error on the next line"
-    putStrLn text
+    putStrLn (pretty_run page_width [] text)
 
-error_report occur (Untyped name) = name ++ " : ?"
-error_report occur (ShouldBeAnnotated term) = stringify 0 occur term ++ " : ?"
-error_report occur fail = show fail
+print_module_entry page_width (m, Problems string) =
+    putStrLn ("# " ++ string)
 
+print_module_entry page_width (m, Errors name errors) = do
+    let decls = get_declarations m
+    let (Just term) = Map.lookup name decls
+    let ref = references term
+    let occur name = (Set.member name ref || Map.member name decls)
+    let print_entry e = (putStrLn $ pretty_run page_width (fresh_names occur) (textb "# " >> e))
+    mapM_ (print_entry.error_report) errors
+
+error_report (Untyped name) = textb name >> textb " : ?"
+error_report (ShouldBeAnnotated term) = stringify 0 [] term >> textb " : ?"
+error_report fail = textb (show fail)
+
+report_missing_declaration :: (Map.Map String Term) -> String -> IO ()
+report_missing_declaration decls name =
+    if Map.member name decls
+        then return ()
+        else putStrLn ("# " ++ name ++ " = ?")
+
+report_missing_judgement :: (Map.Map String Type) -> String -> IO ()
 report_missing_judgement judgs name =
     if Map.member name judgs
         then return ()
         else putStrLn ("# " ++ name ++ " : ?")
 
-report_missing_declaration decls name =
-    if Map.member name decls
-        then return ()
-        else putStrLn ("# " ++ name ++ " = ?")
+spaces_apart :: [PrettyState ()] -> PrettyState ()
+spaces_apart (x:[]) = x
+spaces_apart (x:s)  = x >> blankb " " 2 >> spaces_apart s 
+spaces_apart []     = return ()
